@@ -5,102 +5,132 @@ with open("04-input") as f:
 required_keys = set(["byr", "iyr", "eyr", "hgt", "hcl", "ecl", "pid"])
 
 
-def read_one(line):
-    print(f"validating: '{line}'")
-    result = {}
-    # split by space
-    tokens = line.split(" ")
-    # filter empty parts
-    tokens = [x for x in tokens if x != '']
-    for token in tokens:
-         k, _, v = token.partition(":")
-         result[k] = v
-
-    return result
+class InvalidPassport(ValueError):
+    def __init__(self, s):
+        return super().__init__(f"Passport invalid: {s}")
 
 
-def validate(passport, simple=True):
-    keys = set(passport.keys())
-    if not required_keys.issubset(keys):
-        missing = required_keys.difference(keys)
-        print(f" invalid: missing: {missing}")
-        return False
+class Passport():
+    content = None
+    required_keys = set(["byr", "iyr", "eyr", "hgt", "hcl", "ecl", "pid"])
 
-    if simple:
-        return True
+    def __getitem__(self, name):
+        return self.content[name]
 
-    if not (passport["byr"].isdigit() and 1920 <= int(passport["byr"]) <= 2020):
-        print(f" invalid: byr out of range")
-        return False
+    def __setitem__(self, name, value):
+        self.content[name] = value
 
-    if not (passport["iyr"].isdigit() and 2010 <= int(passport["iyr"]) <= 2020):
-        print(f" invalid: iyr out of range")
-        return False
+    def keys(self):
+        return self.content.keys()
 
-    if not (passport["eyr"].isdigit() and 2020 <= int(passport["eyr"]) <= 2030):
-        print(f" invalid: eyr out of range")
-        return False
+    def __init__(self, s, validate_values=False):
+        self.content = {}
+        for token in [x for x in s.split(" ") if x != '']:
+            k, _, v = token.partition(":")
+            self[k] = v
 
-    if passport["hgt"].endswith("cm"):
-        cm = passport["hgt"][:-(len("cm"))]
-        if not cm.isdigit():
-            print(f" invalid: hgt not a number: {cm}")
-            return False
-        if not (150 <= int(cm) <= 193):
-            print(f" invalid: hgt not in range: {passport['hgt']}")
-            return False
-    elif passport["hgt"].endswith("in"):
-        inch = passport["hgt"][:-(len("in"))]
-        if not inch.isdigit():
-            print(f" invalid: hgt not a number: {inch}")
-            return False
-        if not (59 <= int(inch) <= 76):
-            print(f" invalid: hgt not in range: {passport['hgt']}")
-            return False
-    else:
-        print(" invalid: hgt has no unit: {passport['hgt']}")
-        return False
+        self.validate_keys()
+        if validate_values:
+            self.validate_values()
 
-    if not (passport["hcl"].startswith("#") and len(passport["hcl"]) == 7 and all([c in "0123456789abcdef" for c in passport["hcl"][1:]])):
-        print(" invalid: hcl: {passport['hcl']}")
-        return False
+    def validate_keys(self):
+        missing = self.required_keys.difference(self.keys())
+        if missing:
+            raise InvalidPassport(f"missing keys: {', '.join(missing)}")
 
-    if passport["ecl"] not in ("amb", "blu", "brn", "gry", "grn", "hzl", "oth"):
-        print(f" invalid: ecl not in set: {passport['ecl']}")
-        return False
+    def validate_values(self):
+        for field in self.required_keys:
+            getattr(self, f"validate_{field}")()
 
-    if not (passport["pid"].isdigit() and len(passport["pid"]) == 9):
-        print(f" invalid: pid of len {len(passport['pid'])}: '{passport['pid']}'")
-        return False
+    def _validate_range(self, field, value, min_value, max_value, length=None):
+        self.validate_length(field, value, length)
+        self.validate_number(field, value)
+        if not (min_value <= int(value) <= max_value):
+            raise InvalidPassport(f"{field} out of range: {min_value} <= {value} <= {max_value}")
 
-    return True
+    def validate_range_field(self, field, min_value, max_value, length=None):
+        return self._validate_range(field, self[field], min_value, max_value, length)
+
+    def validate_length(self, field, value, length):
+        if length is not None and len(value) != length:
+            raise InvalidPassport(f"field '{field}' has incorrect length ({length}): {value}")
+
+    def validate_number(self, field, value):
+        if not value.isdigit():
+            raise InvalidPassport(f"field '{field}' is not a number: {value}")
+
+    def validate_byr(self):
+        return self.validate_range_field("byr", 1920, 2002, length=4)
+
+    def validate_iyr(self):
+        return self.validate_range_field("iyr", 2010, 2020, length=4)
+
+    def validate_eyr(self):
+        return self.validate_range_field("eyr", 2020, 2030, length=4)
+
+    def validate_hgt(self):
+        if self["hgt"].endswith("cm"):
+            return self._validate_range("hgt", self["hgt"][:-2], 150, 193, length=3)
+        elif self["hgt"].endswith("in"):
+            return self._validate_range("hgt", self["hgt"][:-2],  59,  76, length=2)
+        else:
+            raise InvalidPassport(f"field 'hgt' doesn't have known unit")
+
+    def validate_hcl(self):
+        if not self["hcl"].startswith("#"):
+            raise InvalidPassport(f"field 'hcl' doesn't start with '#': {self['hcl']}")
+        self.validate_length("hcl", self["hcl"], 7)
+        if not set(self["hcl"][1:]).issubset(set("0123456789abcdef")):
+            raise InvalidPassport(f"field 'hcl' doesn't contain hex chars only: {self['hcl']}")
+
+    def validate_ecl(self):
+        if self["ecl"] not in ("amb", "blu", "brn", "gry", "grn", "hzl", "oth"):
+            raise InvalidPassport(f"field 'ecl' not in set: {self['ecl']}")
+
+    def validate_pid(self):
+        self.validate_number("pid", self["pid"])
+        self.validate_length("pid", self["pid"], 9)
 
 
-
-def read_all(lines, simple):
-    valid = 0
-    count = 0
-    last = ""
+def one_liners(lines):
+    new = []
+    buff = ""
     # force flush in the end
     if lines[-1] != "":
         lines.append("")
 
-    for l in lines + [""]:
+    for l in lines:
         if l == '':
-            # flush
-            if last == "":
-                continue
-            count += 1
-            passport = read_one(last)
-            if validate(passport, simple):
-                valid += 1
-            last = ''
+            new.append(buff)
+            buff = ""
         else:
-            last = last + " " + l
+            buff = buff + " " + l
 
-    return count, valid
+    return new
 
-test_input = """ecl:gry pid:860033327 eyr:2020 hcl:#fffffd
+lines = one_liners(str_lines)
+
+def check(lines, validate_values):
+    valid = invalid = 0
+    for l in lines:
+        try:
+            Passport(l, validate_values=validate_values)
+            valid += 1
+        except InvalidPassport as e:
+            print(e)
+            invalid += 1
+    print(f"valid: {valid}")
+    print(f"invalid: {invalid}")
+    return valid, invalid
+
+
+def one(lines):
+    return check(lines, False)
+
+def two(lines):
+    return check(lines, True)
+
+test_lines = one_liners("""ecl:gry pid:860033327 eyr:2020 hcl:#fffffd
 byr:1937 iyr:2017 cid:147 hgt:183cm
 
 iyr:2013 ecl:amb cid:350 eyr:2023 pid:028048884
@@ -112,12 +142,13 @@ ecl:brn pid:760753108 byr:1931
 hgt:179cm
 
 hcl:#cfa07d eyr:2025 pid:166559648
-iyr:2011 ecl:brn hgt:59in""".splitlines()
+iyr:2011 ecl:brn hgt:59in
+""".splitlines())
 
 
-assert read_all(test_input, True) == (4, 2)
+assert one(test_lines) == (2, 2)
 
-assert read_all("""eyr:1972 cid:100
+assert two(one_liners("""eyr:1972 cid:100
 hcl:#18171d ecl:amb hgt:170 pid:186cm iyr:2018 byr:1926
 
 iyr:2019
@@ -129,9 +160,10 @@ ecl:brn hgt:182cm pid:021572410 eyr:2020 byr:1992 cid:277
 
 hgt:59cm ecl:zzz
 eyr:2038 hcl:74454a iyr:2023
-pid:3556412378 byr:2007""".splitlines(), False) == (4, 0)
+pid:3556412378 byr:2007
+""".splitlines())) == (0, 4)
 
-assert read_all("""pid:087499704 hgt:74in ecl:grn iyr:2012 eyr:2030 byr:1980
+assert two(one_liners("""pid:087499704 hgt:74in ecl:grn iyr:2012 eyr:2030 byr:1980
 hcl:#623a2f
 
 eyr:2029 ecl:blu cid:129 byr:1989
@@ -142,4 +174,5 @@ hgt:164cm byr:2001 iyr:2015 cid:88
 pid:545766238 ecl:hzl
 eyr:2022
 
-iyr:2010 hgt:158cm hcl:#b6652a ecl:blu byr:1944 eyr:2021 pid:093154719""".splitlines(), False) == (4, 4)
+iyr:2010 hgt:158cm hcl:#b6652a ecl:blu byr:1944 eyr:2021 pid:093154719
+""".splitlines())) == (4, 0)
